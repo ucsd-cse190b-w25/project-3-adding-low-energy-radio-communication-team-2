@@ -21,7 +21,19 @@
 //#include "ble_commands.h"
 #include "ble.h"
 
+// Other imports
+#include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <limits.h>
+
+/* Include memory map of our MCU */
+#include <stm32l475xx.h>
+
+#include "leds.h" //TODO: Remove!!
+#include "timer.h"
+#include "i2c.h"
+#include "lsm6dsl.h"
 
 int dataAvailable = 0;
 
@@ -30,6 +42,35 @@ SPI_HandleTypeDef hspi3;
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_SPI3_Init(void);
+
+// Counter to keep track of every time a 50 ms duration elapses and the device is not moving.
+volatile unsigned int start_i = 0;
+
+// Redefine the libc _write() function so you can use printf in your code
+int _write(int file, char *ptr, int len) {
+    int i = 0;
+    for (i = 0; i < len; i++) {
+        ITM_SendChar(*ptr++);
+    }
+    return len;
+}
+
+
+void TIM2_IRQHandler() {
+	// Checking whether TIM2 has had an update event, and then clearing the update event every time it happens.
+    if (TIM2->SR & TIM_SR_UIF) {
+        TIM2->SR &= ~TIM_SR_UIF;
+
+        start_i++;
+
+        // Ensure that the counter does not go out of bounds, and resets smoothly.
+        // Note: UINT8_MAX * 1200 represents the start_i value at which the mins_lost value overflows and resets to 1.
+        // We round down UINT_MAX to the highest multiple of this overflow value to ensure that the timer resets without breaking the pattern.
+        if (start_i == (UINT_MAX - (UINT_MAX % (UINT8_MAX * 1200)))) {
+            start_i = 1200;
+        }
+    }
+}
 
 /**
   * @brief  The application entry point.
@@ -47,6 +88,14 @@ int main(void)
   MX_GPIO_Init();
   MX_SPI3_Init();
 
+  /* Initialize Timer, I2C, and Accelerometer*/
+  leds_init(); // TODO: Remove!!
+  timer_init(TIM2);
+  timer_set_ms(TIM2, 50);
+  i2c_init();
+  lsm6dsl_init();
+
+
   //RESET BLE MODULE
   HAL_GPIO_WritePin(BLE_RESET_GPIO_Port,BLE_RESET_Pin,GPIO_PIN_RESET);
   HAL_Delay(10);
@@ -58,14 +107,52 @@ int main(void)
 
   uint8_t nonDiscoverable = 0;
 
+  // Poll the accelerometer using the last known values
+  int16_t last_x = 0, last_y = 0, last_z = 0;
+  lsm6dsl_read_xyz(&last_x, &last_y, &last_z);
+  int16_t data_x = 0, data_y = 0, data_z = 0;
+  uint8_t secs_lost = 0;
+  leds_set(3);
+  int counter = 0;
   while (1)
   {
-	  if(!nonDiscoverable && HAL_GPIO_ReadPin(BLE_INT_GPIO_Port,BLE_INT_Pin)){
-	    catchBLE();
-	  }else{
-		  HAL_Delay(1000);
+	  lsm6dsl_read_xyz(&data_x, &data_y, &data_z);
+	  if (counter % 2 == 0) {
+		  leds_set(3);
+	  } else {
+		  leds_set(0);
+	  }
+	  counter++;
+	  // Threshold chosen as 0.1g based on the uncertainty and values given.
+      int threshold = 1639;
+	  if ((abs(last_x - data_x) > threshold || abs(last_y - data_y) > threshold || abs(last_z - data_z) > threshold)) {
+		  // Reset timer since last movement.
+		  leds_set(0);
+		  start_i = 0;
+	  }
+
+	  last_x = data_x;
+	  last_y = data_y;
+	  last_z = data_z;
+
+//	  if(!nonDiscoverable && HAL_GPIO_ReadPin(BLE_INT_GPIO_Port,BLE_INT_Pin)){
+//	    catchBLE();
+//	  } else {
+	  if (start_i >= 1200) {
+		  leds_set(3);
+		  if (start_i >= (secs_lost+1) * 20) {
+			  // Avoid overflowing
+			  if (start_i / 20 == UINT8_MAX) {
+				  secs_lost = 1;
+			  } else {
+				  secs_lost = start_i / 20;
+			  }
+		  }
+
+		  HAL_Delay(10000);
 		  // Send a string to the NORDIC UART service, remember to not include the newline
-		  unsigned char test_str[] = "youlostit BLE test";
+		  unsigned char test_str[10];
+		  sprintf(test_str, "%d", secs_lost);
 		  updateCharValue(NORDIC_UART_SERVICE_HANDLE, READ_CHAR_HANDLE, 0, sizeof(test_str)-1, test_str);
 	  }
 	  // Wait for interrupt, only uncomment if low power is needed
