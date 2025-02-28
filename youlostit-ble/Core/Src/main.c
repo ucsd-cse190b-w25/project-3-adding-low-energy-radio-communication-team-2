@@ -30,7 +30,6 @@
 /* Include memory map of our MCU */
 #include <stm32l475xx.h>
 
-#include "leds.h" //TODO: Remove!!
 #include "timer.h"
 #include "i2c.h"
 #include "lsm6dsl.h"
@@ -89,7 +88,6 @@ int main(void)
   MX_SPI3_Init();
 
   /* Initialize Timer, I2C, and Accelerometer*/
-  leds_init(); // TODO: Remove!!
   timer_init(TIM2);
   timer_set_ms(TIM2, 50);
   i2c_init();
@@ -112,48 +110,46 @@ int main(void)
   lsm6dsl_read_xyz(&last_x, &last_y, &last_z);
   int16_t data_x = 0, data_y = 0, data_z = 0;
   uint8_t secs_lost = 0;
-  leds_set(3);
-  int counter = 0;
   while (1)
   {
 	  lsm6dsl_read_xyz(&data_x, &data_y, &data_z);
-	  if (counter % 2 == 0) {
-		  leds_set(3);
-	  } else {
-		  leds_set(0);
-	  }
-	  counter++;
 	  // Threshold chosen as 0.1g based on the uncertainty and values given.
       int threshold = 1639;
 	  if ((abs(last_x - data_x) > threshold || abs(last_y - data_y) > threshold || abs(last_z - data_z) > threshold)) {
 		  // Reset timer since last movement.
-		  leds_set(0);
 		  start_i = 0;
+		  // Disconnect when moving
+		  disconnectBLE();
+		  if (!nonDiscoverable) {
+			  setDiscoverability(0);
+			  nonDiscoverable = 1;
+		  }
 	  }
 
 	  last_x = data_x;
 	  last_y = data_y;
 	  last_z = data_z;
 
-//	  if(!nonDiscoverable && HAL_GPIO_ReadPin(BLE_INT_GPIO_Port,BLE_INT_Pin)){
-//	    catchBLE();
-//	  } else {
-	  if (start_i >= 1200) {
-		  leds_set(3);
-		  if (start_i >= (secs_lost+1) * 20) {
-			  // Avoid overflowing
-			  if (start_i / 20 == UINT8_MAX) {
-				  secs_lost = 1;
-			  } else {
-				  secs_lost = start_i / 20;
-			  }
-		  }
+	  if(!nonDiscoverable && HAL_GPIO_ReadPin(BLE_INT_GPIO_Port,BLE_INT_Pin)){
+	    catchBLE();
+	  }
 
-		  HAL_Delay(10000);
-		  // Send a string to the NORDIC UART service, remember to not include the newline
-		  unsigned char test_str[10];
-		  sprintf(test_str, "%d", secs_lost);
-		  updateCharValue(NORDIC_UART_SERVICE_HANDLE, READ_CHAR_HANDLE, 0, sizeof(test_str)-1, test_str);
+	  // Start beaconing at 1 min
+	  if (start_i >= 1200) {
+		  // Set discoverable if not discoverable
+		  if (nonDiscoverable) {
+			  setDiscoverability(1);
+			  nonDiscoverable = 0;
+		  }
+		  secs_lost = start_i / 20;
+		  if (secs_lost % 10 == 0) {
+			  HAL_Delay(1000);
+			  unsigned char lost_str[] = "ArayTag missing for ";
+			  updateCharValue(NORDIC_UART_SERVICE_HANDLE, READ_CHAR_HANDLE, 0, strlen(lost_str), lost_str);
+			  unsigned char time_str[20];  // Ensure enough space for the formatted string
+			  sprintf(time_str, "%d s", secs_lost);
+			  updateCharValue(NORDIC_UART_SERVICE_HANDLE, READ_CHAR_HANDLE, 0, strlen(time_str), time_str);
+		  }
 	  }
 	  // Wait for interrupt, only uncomment if low power is needed
 	  //__WFI();

@@ -19,7 +19,7 @@ void timer_init(TIM_TypeDef* timer)
 	// Trigger an update event for the registers and reinitialize the counter.
 	timer->EGR = TIM_EGR_UG;
 	// Set prescaler to 3 so that the frequency is set to CK_CNT = (4 MHz)/(3+1) = 1 MHz.
-	timer->PSC = 3;
+	timer->PSC = 7;
 	// Set auto-reload to 999 so that the frequency is set to (1 MHz)/(999+1) = 1KHz
 	// This equates to a period of 1 ms for auto-reloading, so an interrupt is triggered
 	// at some multiple of 1ms later defined.
