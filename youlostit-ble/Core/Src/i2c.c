@@ -34,6 +34,7 @@ void i2c_init()
     I2C2->CR1 &= ~I2C_CR1_PE;
     // Timing set to a frequency of 250 KHz.
     I2C2->TIMINGR = (0 << 28) | (0x3 << 0) | (0x3 << 8) | (0x3 << 16) | (0x3 << 20);
+//    I2C2->TIMINGR = (0 << 28) | (2 << 20) | (2 << 16) | (4 << 8) | (4 << 0);
     I2C2->CR1 |= I2C_CR1_PE;
 }
 

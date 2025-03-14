@@ -8,7 +8,7 @@
 #include "timer.h"
 
 
-void timer_init(TIM_TypeDef* timer)
+void timer_init(TIM_TypeDef* timer, int freq)
 {
 	// Enable register 1 for peripheral clock APB1, so that read/write access is supported.
 	RCC->APB1ENR1 |= RCC_APB1ENR1_TIM2EN;
@@ -18,12 +18,17 @@ void timer_init(TIM_TypeDef* timer)
 	timer->CNT = 0;
 	// Trigger an update event for the registers and reinitialize the counter.
 	timer->EGR = TIM_EGR_UG;
-	// Set prescaler to 3 so that the frequency is set to CK_CNT = (4 MHz)/(3+1) = 1 MHz.
-	timer->PSC = 7;
-	// Set auto-reload to 999 so that the frequency is set to (1 MHz)/(999+1) = 1KHz
-	// This equates to a period of 1 ms for auto-reloading, so an interrupt is triggered
-	// at some multiple of 1ms later defined.
-	timer->ARR = 999;
+	if (freq == 8) {
+		timer->PSC = 7;
+		timer->ARR = 999;
+	} else {
+		// Set prescaler to 3 so that the frequency is set to CK_CNT = (4 MHz)/(3+1) = 1 MHz.
+		timer->PSC = 0;
+		// Set auto-reload to 999 so that the frequency is set to (1 MHz)/(999+1) = 1KHz
+		// This equates to a period of 1 ms for auto-reloading, so an interrupt is triggered
+		// at some multiple of 1ms later defined.
+		timer->ARR = 99;
+	}
 	// Enable auto-reload preload. This ensures that changes to ARR only
 	// take place upon completion of a cycle.
 	timer->CR1 |= TIM_CR1_ARPE;
@@ -43,7 +48,7 @@ void timer_reset(TIM_TypeDef* timer)
 	timer->CNT = 0;
 }
 
-void timer_set_ms(TIM_TypeDef* timer, uint16_t period_ms)
+void timer_set_ms(TIM_TypeDef* timer, uint16_t period_ms, int freq)
 {
 	// Disable the counters for safe changes.
     timer->CR1 &= ~TIM_CR1_CEN;
@@ -52,7 +57,11 @@ void timer_set_ms(TIM_TypeDef* timer, uint16_t period_ms)
      * equates to freq = (10^6)/(1000*period_ms) = 10^3/period_ms Hz.
      * The period of this is then 1/freq = period_ms/10^3 which is period_ms milliseconds, as desired.
      */
-    timer->ARR = (1000*period_ms) - 1;
+    if (freq == 8) {
+    	timer->ARR = (1000*period_ms) - 1;
+    } else {
+        timer->ARR = (100*period_ms) - 1;
+    }
     // Trigger an update event for the registers and reinitialize the counter.
     timer->EGR |= TIM_EGR_UG;
     // Enable the timer.
